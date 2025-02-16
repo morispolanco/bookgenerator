@@ -8,11 +8,11 @@ from docx.oxml import OxmlElement
 from io import BytesIO
 import re
 from ebooklib import epub
-import stripe
+import stripe  # Importar la biblioteca de Stripe
 
 # Configuración de Stripe
-stripe.api_key = st.secrets["stripe"]["secret_key"]
-PUBLISHABLE_KEY = st.secrets["stripe"]["publishable_key"]
+stripe.api_key = st.secrets["STRIPE_SECRET_KEY"]  # Clave secreta de Stripe
+stripe_public_key = st.secrets["STRIPE_PUBLIC_KEY"]  # Clave pública de Stripe
 
 # Función para limpiar Markdown
 def clean_markdown(text):
@@ -144,9 +144,10 @@ def create_word_document(chapters, title, author_name, author_bio, language):
         # Dividir el contenido del capítulo en párrafos
         paragraphs = chapter.split("\n")
         for paragraph_text in paragraphs:
+            # Usar el texto original sin división de palabras
             paragraph = doc.add_paragraph(paragraph_text.strip())  # Crear un nuevo párrafo
             paragraph.style = "Normal"
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT  # Alineación a la izquierda
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY  # Alineación justificada
             paragraph.paragraph_format.space_after = Pt(0)  # Espaciado posterior de 0 puntos
             for run in paragraph.runs:
                 run.font.size = Pt(11)
@@ -222,7 +223,7 @@ This application automatically generates non-fiction books in `.docx` or `eBook 
 5. Choose the book's language.
 6. Decide whether to include an introduction, conclusions, author name, and author profile.
 7. Click "Generate Book".
-8. Pay $9 to download the generated file.
+8. Pay $9 to download the book.
 """)
 st.sidebar.markdown("""
 ---
@@ -303,68 +304,58 @@ if st.button("🚀 Generate Book"):
 
 # Mostrar opciones de descarga si hay capítulos generados
 if st.session_state.chapters:
-    st.subheader("💳 Payment Required")
-    st.write("To download your book, please pay $9 using the button below.")
+    st.subheader("⬇️ Download Options")
+    
+    # Verificar si el pago ya fue realizado
+    if 'payment_successful' not in st.session_state:
+        st.session_state.payment_successful = False
 
-    # Crear un enlace de pago con Stripe
-    checkout_session = stripe.checkout.Session.create(
-        payment_method_types=["card"],
-        line_items=[
-            {
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {
-                        "name": "Book Download",
-                    },
-                    "unit_amount": 900,  # $9.00 en centavos
-                },
-                "quantity": 1,
-            }
-        ],
-        mode="payment",
-        success_url="http://localhost:8501?session_id={CHECKOUT_SESSION_ID}",
-        cancel_url="http://localhost:8501",
-    )
-
-    # Mostrar el botón de pago
-    st.markdown(f"""
-    <a href="{checkout_session.url}" target="_blank">
-        <button style="background-color: #6200ea; color: white; padding: 10px 20px; border: none; border-radius: 5px; font-size: 16px;">
-            Pay $9
-        </button>
-    </a>
-    """, unsafe_allow_html=True)
-
-    # Verificar si el pago fue exitoso
-    query_params = st.experimental_get_query_params()
-    session_id = query_params.get("session_id", [None])[0]
-
-    if session_id:
-        try:
-            # Recuperar la sesión de Stripe para verificar el estado del pago
-            session = stripe.checkout.Session.retrieve(session_id)
-            if session.payment_status == "paid":
-                st.success("🎉 Payment successful! You can now download your book.")
-                
-                # Crear los archivos Word y ePub
-                word_file = create_word_document(st.session_state.chapters, topic, author_name, author_bio, selected_language.lower())
-                epub_file = create_epub_document(st.session_state.chapters, topic, author_name, author_bio)
-
-                # Botones de descarga
-                st.download_button(
-                    label="📥 Download in Word",
-                    data=word_file,
-                    file_name=f"{topic}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if not st.session_state.payment_successful:
+        st.write("To download the book, please complete the payment of $9.")
+        if st.button("💳 Pay with Stripe"):
+            # Crear una sesión de pago con Stripe
+            try:
+                session = stripe.checkout.Session.create(
+                    payment_method_types=['card'],
+                    line_items=[{
+                        'price_data': {
+                            'currency': 'usd',
+                            'product_data': {
+                                'name': 'Book Download',
+                            },
+                            'unit_amount': 900,  # $9.00 en centavos
+                        },
+                        'quantity': 1,
+                    }],
+                    mode='payment',
+                    success_url=st.secrets["SUCCESS_URL"],  # URL de éxito
+                    cancel_url=st.secrets["CANCEL_URL"],    # URL de cancelación
                 )
+                st.write(f"Please complete your payment [here]({session.url}).")
+            except Exception as e:
+                st.error(f"Error creating payment session: {str(e)}")
+    else:
+        st.success("Payment successful! You can now download the book.")
+        word_file = create_word_document(st.session_state.chapters, topic, author_name, author_bio, selected_language.lower())
+        epub_file = create_epub_document(st.session_state.chapters, topic, author_name, author_bio)
 
-                st.download_button(
-                    label="📖 Download as eBook (.epub)",
-                    data=epub_file,
-                    file_name=f"{topic}.epub",
-                    mime="application/epub+zip"
-                )
-            else:
-                st.error("❌ Payment failed. Please try again.")
-        except Exception as e:
-            st.error(f"Error verifying payment: {str(e)}")
+        st.download_button(
+            label="📥 Download in Word",
+            data=word_file,
+            file_name=f"{topic}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+        st.download_button(
+            label="📖 Download as eBook (.epub)",
+            data=epub_file,
+            file_name=f"{topic}.epub",
+            mime="application/epub+zip"
+        )
+
+# Pie de página simplificado
+st.markdown("""
+    <footer style='text-align: center; padding: 10px; background-color: #f8f9fa; border-top: 1px solid #ddd;'>
+        <a href='https://hablemosbien.org' target='_blank' style='color: #007bff; text-decoration: none;'>Hablemos Bien</a>
+    </footer>
+""", unsafe_allow_html=True)
