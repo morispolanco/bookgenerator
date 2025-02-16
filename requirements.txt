@@ -1,0 +1,6 @@
+streamlit 
+python-docx 
+requests
+ebooklib
+hyphenate
+stripe
