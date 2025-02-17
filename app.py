@@ -7,18 +7,40 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from io import BytesIO
 import re
-from ebooklib import epub
-import stripe  # Importar la biblioteca de Stripe
-
-# Configuración de Stripe
-stripe.api_key = st.secrets["STRIPE_SECRET_KEY"]  # Clave secreta de Stripe
-stripe_public_key = st.secrets["STRIPE_PUBLIC_KEY"]  # Clave pública de Stripe
 
 # Función para limpiar Markdown
 def clean_markdown(text):
     """Elimina marcas de Markdown del texto."""
     text = re.sub(r'[#*_`]', '', text)  # Eliminar caracteres especiales de Markdown
     return text.strip()
+
+# Función para procesar listas y reemplazar guiones por rayas
+def process_lists(text):
+    """
+    Procesa el texto para:
+    1. Reemplazar guiones ('-') al inicio de las listas por rayas ('—').
+    2. Asegurar que después de las listas haya un salto de párrafo.
+    """
+    lines = text.split('\n')  # Dividir el texto en líneas
+    processed_lines = []
+    in_list = False  # Indicador para saber si estamos dentro de una lista
+
+    for line in lines:
+        stripped_line = line.strip()
+        if stripped_line.startswith('-'):  # Detectar líneas que comienzan con un guion
+            # Reemplazar el guion por una raya
+            processed_line = stripped_line.replace('-', '—', 1)
+            processed_lines.append(processed_line)
+            in_list = True
+        else:
+            if in_list:
+                # Si salimos de una lista, añadir un salto de párrafo
+                processed_lines.append("")  # Salto de párrafo
+                in_list = False
+            processed_lines.append(stripped_line)
+
+    # Unir las líneas procesadas con saltos de párrafo
+    return '\n\n'.join(processed_lines)
 
 # Función para aplicar reglas de capitalización según el idioma
 def format_title(title, language):
@@ -38,13 +60,13 @@ def format_title(title, language):
         return title.title()
 
 # Función para generar un capítulo
-def generate_chapter(api_key, topic, audience, chapter_number, language, instructions="", is_intro=False, is_conclusion=False):
+def generate_chapter(api_key, topic, audience, chapter_number, language, table_of_contents="", specific_instructions="", is_intro=False, is_conclusion=False):
     url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
-    # Construir el mensaje con las instrucciones especiales
+    # Construir el mensaje con la tabla de contenido e instrucciones específicas
     if is_intro:
         message_content = f"Write the introduction of a book about {topic} aimed at {audience} with 500-800 words in {language}."
     elif is_conclusion:
@@ -52,8 +74,11 @@ def generate_chapter(api_key, topic, audience, chapter_number, language, instruc
     else:
         message_content = f"Write chapter {chapter_number} of a book about {topic} aimed at {audience} with 2000-2500 words in {language}."
     
-    if instructions:
-        message_content += f" Additional instructions: {instructions}"
+    if table_of_contents:
+        message_content += f" Use the following table of contents as a guide: {table_of_contents}"
+    
+    if specific_instructions:
+        message_content += f" Follow these specific instructions: {specific_instructions}"
     
     data = {
         "model": "qwen-turbo",
@@ -141,14 +166,16 @@ def create_word_document(chapters, title, author_name, author_bio, language):
         chapter_title.runs[0].font.size = Pt(12)
         chapter_title.runs[0].font.name = "Times New Roman"
 
-        # Dividir el contenido del capítulo en párrafos
-        paragraphs = chapter.split("\n")
-        for paragraph_text in paragraphs:
-            # Usar el texto original sin división de palabras
-            paragraph = doc.add_paragraph(paragraph_text.strip())  # Crear un nuevo párrafo
+        # Procesar el contenido del capítulo
+        processed_chapter = process_lists(chapter)  # Procesar listas y reemplazar guiones por rayas
+        paragraphs = processed_chapter.split('\n\n')  # Dividir por párrafos
+        for para_text in paragraphs:
+            # Eliminar saltos de línea manuales dentro del párrafo
+            para_text = para_text.replace('\n', ' ').strip()
+            paragraph = doc.add_paragraph(para_text)  # Crear un nuevo párrafo
             paragraph.style = "Normal"
             paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY  # Alineación justificada
-            paragraph.paragraph_format.space_after = Pt(0)  # Espaciado posterior de 0 puntos
+            paragraph.paragraph_format.space_after = Pt(0)  # Espaciado posterior de 12 puntos
             for run in paragraph.runs:
                 run.font.size = Pt(11)
                 run.font.name = "Times New Roman"
@@ -164,44 +191,6 @@ def create_word_document(chapters, title, author_name, author_bio, language):
     buffer.seek(0)
     return buffer
 
-# Función para crear un archivo eBook (.epub)
-def create_epub_document(chapters, title, author_name, author_bio):
-    book = epub.EpubBook()
-
-    # Metadatos del eBook
-    book.set_identifier('id123456')
-    book.set_title(title)
-    book.set_language('en')  # Idioma predeterminado del eBook
-    book.add_author(author_name or 'Automatic Book Generator')
-
-    # Crear capítulos
-    epub_chapters = []
-    for i, chapter in enumerate(chapters, 1):
-        c = epub.EpubHtml(title=f'Chapter {i}', file_name=f'chap_{i}.xhtml', lang='en')
-        c.content = f"<h1>Chapter {i}</h1><p>{chapter}</p>"
-        book.add_item(c)
-        epub_chapters.append(c)
-    
-    # Añadir perfil del autor si está proporcionado
-    if author_bio:
-        bio = epub.EpubHtml(title='Author Information', file_name='author_bio.xhtml', lang='en')
-        bio.content = f"<h1>Author Information</h1><p>{author_bio}</p>"
-        book.add_item(bio)
-        epub_chapters.append(bio)
-    
-    # Definir tabla de contenido
-    book.toc = tuple(epub_chapters)
-
-    # Agregar navegación
-    book.add_item(epub.EpubNcx())
-    book.add_item(epub.EpubNav())
-
-    # Guardar el eBook en memoria
-    buffer = BytesIO()
-    epub.write_epub(buffer, book)
-    buffer.seek(0)
-    return buffer
-
 # Configuración de Streamlit
 st.set_page_config(
     page_title="Automatic Book Generator",
@@ -214,16 +203,17 @@ st.title("📚 Automatic Book Generator")
 # Barra lateral con instrucciones y anuncio
 st.sidebar.header("📖 How does this app work?")
 st.sidebar.markdown("""
-This application automatically generates non-fiction books in `.docx` or `eBook (.epub)` format based on a topic and target audience.  
+This application automatically generates non-fiction books in `.docx` format based on a topic and target audience.  
 **Steps to use it:**
 1. Enter the book's topic.
 2. Specify the target audience.
-3. Write special instructions (optional).
-4. Select the number of chapters desired (maximum 20).
-5. Choose the book's language.
-6. Decide whether to include an introduction, conclusions, author name, and author profile.
-7. Click "Generate Book".
-8. Pay $9 to download the book.
+3. Provide an optional table of contents.
+4. Write optional specific instructions.
+5. Select the number of chapters desired (maximum 20).
+6. Choose the book's language.
+7. Decide whether to include an introduction, conclusions, author name, and author profile.
+8. Click "Generate Book".
+9. Download the generated file.
 """)
 st.sidebar.markdown("""
 ---
@@ -240,18 +230,31 @@ api_key = st.secrets["DASHSCOPE_API_KEY"]
 # Entradas del usuario
 topic = st.text_input("📒 Book Topic:")
 audience = st.text_input("🎯 Target Audience:")
-instructions = st.text_area("📝 Special Instructions (optional):", 
-                             placeholder="Example: Use a formal tone, include practical examples, avoid technical jargon...")
+
+# Campo para la tabla de contenido optativa
+table_of_contents = st.text_area(
+    "📚 Optional Table of Contents:", 
+    placeholder="If you provide a table of contents (chapters with sections), the chapters will be longer."
+)
+
+# Campo para instrucciones específicas optativas
+specific_instructions = st.text_area(
+    "📝 Optional Specific Instructions:", 
+    placeholder="Provide specific instructions for the book (e.g., tone, style, key points to include)."
+)
+
 num_chapters = st.slider("🔢 Number of Chapters", min_value=1, max_value=20, value=5)
 
 # Opciones para introducción y conclusiones
-include_intro = st.checkbox("✅ Include Introduction", value=True)
-include_conclusion = st.checkbox("✅ Include Conclusions", value=True)
+include_intro = st.checkbox("Include Introduction", value=True)
+include_conclusion = st.checkbox("Include Conclusions", value=True)
 
 # Opciones adicionales
 author_name = st.text_input("🖋️ Author Name (optional):")
-author_bio = st.text_area("👤 Author Profile (optional):", 
-                          placeholder="Example: Brief professional description or biography.")
+author_bio = st.text_area(
+    "👤 Author Profile (optional):", 
+    placeholder="Example: Brief professional description or biography."
+)
 
 # Menú desplegable para elegir el idioma
 languages = [
@@ -269,13 +272,13 @@ if st.button("🚀 Generate Book"):
     if not topic or not audience:
         st.error("Please enter a valid topic and target audience.")
         st.stop()
-    
+     
     chapters = []
     
     # Generar introducción si está seleccionada
     if include_intro:
         st.write("⏳ Generating introduction...")
-        intro_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), instructions, is_intro=True)
+        intro_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions, is_intro=True)
         chapters.append(intro_content)
         with st.expander("🌟 Introduction"):
             st.write(intro_content)
@@ -284,8 +287,8 @@ if st.button("🚀 Generate Book"):
     progress_bar = st.progress(0)
     for i in range(1, num_chapters + 1):
         st.write(f"⏳ Generating chapter {i}...")
-        chapter_content = generate_chapter(api_key, topic, audience, i, selected_language.lower(), instructions)
-        word_count = len(chapter_content.split())  # Contar palabras
+        chapter_content = generate_chapter(api_key, topic, audience, i, selected_language.lower(), table_of_contents, specific_instructions)
+        word_count = len(chapter_content.split())   # Contar palabras
         chapters.append(chapter_content)
         with st.expander(f" Chapter {i} ({word_count} words)"):
             st.write(chapter_content)
@@ -294,7 +297,7 @@ if st.button("🚀 Generate Book"):
     # Generar conclusiones si están seleccionadas
     if include_conclusion:
         st.write("⏳ Generating conclusions...")
-        conclusion_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), instructions, is_conclusion=True)
+        conclusion_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions, is_conclusion=True)
         chapters.append(conclusion_content)
         with st.expander("🔚 Conclusions"):
             st.write(conclusion_content)
@@ -305,57 +308,11 @@ if st.button("🚀 Generate Book"):
 # Mostrar opciones de descarga si hay capítulos generados
 if st.session_state.chapters:
     st.subheader("⬇️ Download Options")
-    
-    # Verificar si el pago ya fue realizado
-    if 'payment_successful' not in st.session_state:
-        st.session_state.payment_successful = False
+    word_file = create_word_document(st.session_state.chapters, topic, author_name, author_bio, selected_language.lower())
 
-    if not st.session_state.payment_successful:
-        st.write("To download the book, please complete the payment of $9.")
-        if st.button("💳 Pay with Stripe"):
-            # Crear una sesión de pago con Stripe
-            try:
-                session = stripe.checkout.Session.create(
-                    payment_method_types=['card'],
-                    line_items=[{
-                        'price_data': {
-                            'currency': 'usd',
-                            'product_data': {
-                                'name': 'Book Download',
-                            },
-                            'unit_amount': 900,  # $9.00 en centavos
-                        },
-                        'quantity': 1,
-                    }],
-                    mode='payment',
-                    success_url=st.secrets["SUCCESS_URL"],  # URL de éxito
-                    cancel_url=st.secrets["CANCEL_URL"],    # URL de cancelación
-                )
-                st.write(f"Please complete your payment [here]({session.url}).")
-            except Exception as e:
-                st.error(f"Error creating payment session: {str(e)}")
-    else:
-        st.success("Payment successful! You can now download the book.")
-        word_file = create_word_document(st.session_state.chapters, topic, author_name, author_bio, selected_language.lower())
-        epub_file = create_epub_document(st.session_state.chapters, topic, author_name, author_bio)
-
-        st.download_button(
-            label="📥 Download in Word",
-            data=word_file,
-            file_name=f"{topic}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
-
-        st.download_button(
-            label="📖 Download as eBook (.epub)",
-            data=epub_file,
-            file_name=f"{topic}.epub",
-            mime="application/epub+zip"
-        )
-
-# Pie de página simplificado
-st.markdown("""
-    <footer style='text-align: center; padding: 10px; background-color: #f8f9fa; border-top: 1px solid #ddd;'>
-        <a href='https://hablemosbien.org' target='_blank' style='color: #007bff; text-decoration: none;'>Hablemos Bien</a>
-    </footer>
-""", unsafe_allow_html=True)
+    st.download_button(
+        label="📥 Download in Word",
+        data=word_file,
+        file_name=f"{topic}.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
