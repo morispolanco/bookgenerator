@@ -19,7 +19,7 @@ def process_lists(text):
     """
     Procesa el texto para:
     1. Reemplazar guiones ('-') al inicio de las listas por rayas ('—').
-    2. Asegurar que después de las listas haya un salto de párrafo.
+    2. Asegurar que después de las listas haya un salto de párrafo. 
     """
     lines = text.split('\n')  # Dividir el texto en líneas
     processed_lines = []
@@ -59,13 +59,10 @@ def format_title(title, language):
         # Capitalizar cada palabra para otros idiomas
         return title.title()
 
-# Función para generar un capítulo
+# Función para generar un capítulo usando Google Gemini
 def generate_chapter(api_key, topic, audience, chapter_number, language, table_of_contents="", specific_instructions="", is_intro=False, is_conclusion=False):
-    url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    
     # Construir el mensaje con la tabla de contenido e instrucciones específicas
     if is_intro:
         message_content = f"Write the introduction of a book about {topic} aimed at {audience} with 500-800 words in {language}."
@@ -81,19 +78,33 @@ def generate_chapter(api_key, topic, audience, chapter_number, language, table_o
         message_content += f" Follow these specific instructions: {specific_instructions}"
     
     data = {
-        "model": "qwen-turbo",
-        "messages": [
-            {"role": "system", "content": f"You are a helpful assistant that writes in {language}."},
-            {"role": "user", "content": message_content}
-        ]
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": message_content
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 1,
+            "topK": 40,
+            "topP": 0.95,
+            "maxOutputTokens": 8192,
+            "responseMimeType": "text/plain"
+        }
     }
+    
     try:
-        response = requests.post(url, json=data, headers=headers)
+        response = requests.post(url, json=data)
         response.raise_for_status()  # Lanza una excepción si hay un error HTTP
-        content = response.json().get("choices", [{}])[0].get("message", {}).get("content", "Error generating the chapter.")
+        content = response.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "Error generating the chapter.")
     except Exception as e:
         st.error(f"Error generating chapter {chapter_number}: {str(e)}")
         content = "Error generating the chapter."
+    
     return clean_markdown(content)
 
 # Función para agregar numeración de páginas al documento Word
@@ -202,7 +213,7 @@ st.title("📚 Automatic Book Generator")
 
 # Barra lateral con instrucciones y anuncio
 st.sidebar.header("📖 How does this app work?")
-st.sidebar.markdown("""
+st.sidebar.markdown(""" 
 This application automatically generates non-fiction books in `.docx` format based on a topic and target audience.  
 **Steps to use it:**
 1. Enter the book's topic.
@@ -222,10 +233,10 @@ st.sidebar.markdown("""
 """)
 
 # Validación de claves secretas
-if "DASHSCOPE_API_KEY" not in st.secrets:
+if "GOOGLE_API_KEY" not in st.secrets:
     st.error("Please configure the API key in Streamlit secrets.")
     st.stop()
-api_key = st.secrets["DASHSCOPE_API_KEY"]
+api_key = st.secrets["GOOGLE_API_KEY"]
 
 # Entradas del usuario
 topic = st.text_input("📒 Book Topic:")
@@ -272,7 +283,7 @@ if st.button("🚀 Generate Book"):
     if not topic or not audience:
         st.error("Please enter a valid topic and target audience.")
         st.stop()
-     
+    
     chapters = []
     
     # Generar introducción si está seleccionada
