@@ -80,7 +80,6 @@ def generate_chapter(api_key, topic, audience, chapter_number, language, table_o
             "temperature": 1,
             "topK": 40,
             "topP": 0.95,
-            "maxOutputTokens": 8192,
             "responseMimeType": "text/plain"
         }
     }
@@ -204,7 +203,7 @@ The books can be **fiction** or **non-fiction**, depending on your input.
 2. Specify the target audience.
 3. Provide an optional table of contents.
 4. Write optional specific instructions.
-5. Select the number of chapters desired (maximum 20).
+5. Select the number of chapters desired (maximum 50).
 6. Choose the book's language.
 7. Decide whether to include an introduction, conclusions, author name, and author profile.
 8. Click "Generate Book".
