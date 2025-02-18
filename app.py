@@ -42,24 +42,6 @@ def process_dialogues_and_lists(text):
     # Unir las líneas procesadas con saltos de párrafo
     return '\n\n'.join(processed_lines)
 
-# Función para eliminar transiciones al siguiente capítulo
-def remove_next_chapter_references(text, chapter_number):
-    """
-    Elimina referencias al siguiente capítulo dentro del texto.
-    """
-    patterns = [
-        r"capítulo siguiente",  # Referencias en español
-        r"próximo capítulo",
-        r"continúa en el capítulo",
-        r"next chapter",       # Referencias en inglés
-        r"continue to chapter",
-        rf"chapter {chapter_number + 1}",  # Referencias específicas al siguiente capítulo
-        rf"capítulo {chapter_number + 1}"
-    ]
-    for pattern in patterns:
-        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
-    return text.strip()
-
 # Función para aplicar reglas de capitalización según el idioma
 def format_title(title, language):
     """
@@ -75,15 +57,16 @@ def format_title(title, language):
         return title.title()
 
 # Función para generar un capítulo usando Google Gemini
-def generate_chapter(api_key, topic, audience, chapter_number, language, table_of_contents="", specific_instructions=""):
+def generate_chapter(api_key, topic, audience, chapter_number, language, table_of_contents="", specific_instructions="", is_intro=False, is_conclusion=False):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
     
     # Construir el mensaje con la tabla de contenido e instrucciones específicas
-    message_content = (
-        f"Escribe el capítulo {chapter_number} sobre {topic} dirigido a {audience}. "
-        f"El capítulo debe tener al menos 2000 palabras y ser completamente independiente. "
-        f"No incluyas referencias al siguiente capítulo ni frases como 'continúa en el próximo capítulo'."
-    )
+    if is_intro:
+        message_content = f"Escribe la introducción sobre {topic} dirigida a {audience}."
+    elif is_conclusion:
+        message_content = f"Escribe las conclusiones sobre {topic} dirigidas a {audience}."
+    else:
+        message_content = f"Escribe el capítulo {chapter_number} sobre {topic} dirigido a {audience}."
     
     if table_of_contents:
         message_content += f" Sigue esta estructura: {table_of_contents}"
@@ -110,48 +93,10 @@ def generate_chapter(api_key, topic, audience, chapter_number, language, table_o
         st.error(f"Error generating chapter {chapter_number}: {str(e)}")
         content = "Error generating the chapter."
     
-    # Validar el número de palabras
-    word_count = len(content.split())
-    while word_count < 2000:  # Si no alcanza las 2000 palabras, solicitar más contenido
-        additional_content = generate_additional_content(api_key, topic, audience, chapter_number, language)
-        content += "\n\n" + additional_content
-        word_count = len(content.split())
-    
-    # Eliminar referencias al siguiente capítulo
-    content = remove_next_chapter_references(content, chapter_number)
-    
     # Procesar diálogos y listas
     processed_content = process_dialogues_and_lists(content)
     
     return clean_markdown(processed_content)
-
-# Función para generar contenido adicional si no se alcanza el mínimo de palabras
-def generate_additional_content(api_key, topic, audience, chapter_number, language):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-    message_content = (
-        f"Continúa escribiendo el capítulo {chapter_number} sobre {topic} dirigido a {audience}. "
-        f"Asegúrate de no incluir referencias al siguiente capítulo."
-    )
-    
-    data = {
-        "contents": [{"role": "user", "parts": [{"text": message_content}]}],
-        "generationConfig": {
-            "temperature": 1,
-            "topK": 40,
-            "topP": 0.95,
-            "responseMimeType": "text/plain"
-        }
-    }
-    
-    try:
-        response = requests.post(url, json=data)
-        response.raise_for_status()
-        content = response.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "Error generating additional content.")
-    except Exception as e:
-        st.error(f"Error generating additional content for chapter {chapter_number}: {str(e)}")
-        content = "Error generating additional content."
-    
-    return clean_markdown(content)
 
 # Función para agregar numeración de páginas al documento Word
 def add_page_numbers(doc):
@@ -305,9 +250,10 @@ if st.button("🚀 Generate Book"):
     # Generar introducción si está seleccionada
     if include_intro:
         st.write("⏳ Generating introduction...")
-        intro_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions)
+        intro_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions, is_intro=True)
         chapters.append(intro_content)
-        with st.expander("🌟 Introduction"):
+        word_count = len(intro_content.split())
+        with st.expander(f"🌟 Introduction ({word_count} words)"):
             st.write(intro_content)
 
     # Generar capítulos principales
@@ -324,9 +270,10 @@ if st.button("🚀 Generate Book"):
     # Generar conclusiones si están seleccionadas
     if include_conclusion:
         st.write("⏳ Generating conclusions...")
-        conclusion_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions)
+        conclusion_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions, is_conclusion=True)
+        word_count = len(conclusion_content.split())
         chapters.append(conclusion_content)
-        with st.expander("🔚 Conclusions"):
+        with st.expander(f"🔚 Conclusions ({word_count} words)"):
             st.write(conclusion_content)
 
     st.session_state.chapters = chapters
