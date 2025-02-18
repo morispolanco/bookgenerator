@@ -19,7 +19,7 @@ def process_lists(text):
     """
     Procesa el texto para:
     1. Reemplazar guiones ('-') al inicio de las listas por rayas ('—').
-    2. Asegurar que después de las listas haya un salto de párrafo. 
+    2. Asegurar que después de las listas haya un salto de párrafo.
     """
     lines = text.split('\n')  # Dividir el texto en líneas
     processed_lines = []
@@ -65,17 +65,17 @@ def generate_chapter(api_key, topic, audience, chapter_number, language, table_o
     
     # Construir el mensaje con la tabla de contenido e instrucciones específicas
     if is_intro:
-        message_content = f"Write the introduction of a book about {topic} aimed at {audience} with 500-800 words in {language}."
+        message_content = f"Escribe una introducción sobre {topic} dirigida a {audience}. Usa entre 500 y 800 palabras."
     elif is_conclusion:
-        message_content = f"Write the conclusions of a book about {topic} aimed at {audience} with 500-800 words in {language}."
+        message_content = f"Escribe una conclusión sobre {topic} dirigida a {audience}. Usa entre 500 y 800 palabras."
     else:
-        message_content = f"Write chapter {chapter_number} of a book about {topic} aimed at {audience} with 2000-2500 words in {language}."
+        message_content = f"Escribe el capítulo {chapter_number} sobre {topic} dirigido a {audience}. Usa al menos 2500 palabras."
     
     if table_of_contents:
-        message_content += f" Use the following table of contents as a guide: {table_of_contents}"
+        message_content += f" Sigue esta estructura: {table_of_contents}"
     
     if specific_instructions:
-        message_content += f" Follow these specific instructions: {specific_instructions}"
+        message_content += f" {specific_instructions}"
     
     data = {
         "contents": [
@@ -213,8 +213,8 @@ st.title("📚 Automatic Book Generator")
 
 # Barra lateral con instrucciones y anuncio
 st.sidebar.header("📖 How does this app work?")
-st.sidebar.markdown(""" 
-This application automatically generates non-fiction books in `.docx` format based on a topic and target audience.  
+st.sidebar.markdown("""
+This application automatically generates non-fiction books in `.docx` format based on a topic and target audience.
 **Steps to use it:**
 1. Enter the book's topic.
 2. Specify the target audience.
@@ -244,13 +244,13 @@ audience = st.text_input("🎯 Target Audience:")
 
 # Campo para la tabla de contenido optativa
 table_of_contents = st.text_area(
-    "📚 Optional Table of Contents:", 
+    "📚 Optional Table of Contents:",
     placeholder="If you provide a table of contents (chapters with sections), the chapters will be longer."
 )
 
 # Campo para instrucciones específicas optativas
 specific_instructions = st.text_area(
-    "📝 Optional Specific Instructions:", 
+    "📝 Optional Specific Instructions:",
     placeholder="Provide specific instructions for the book (e.g., tone, style, key points to include)."
 )
 
@@ -263,13 +263,13 @@ include_conclusion = st.checkbox("Include Conclusions", value=True)
 # Opciones adicionales
 author_name = st.text_input("🖋️ Author Name (optional):")
 author_bio = st.text_area(
-    "👤 Author Profile (optional):", 
+    "👤 Author Profile (optional):",
     placeholder="Example: Brief professional description or biography."
 )
 
 # Menú desplegable para elegir el idioma
 languages = [
-    "English", "Spanish", "French", "German", "Chinese", "Japanese", 
+    "English", "Spanish", "French", "German", "Chinese", "Japanese",
     "Russian", "Portuguese", "Italian", "Arabic", "Medieval Latin", "Koine Greek"
 ]
 selected_language = st.selectbox("🌐 Choose the book's language:", languages)
@@ -285,7 +285,7 @@ if st.button("🚀 Generate Book"):
         st.stop()
     
     chapters = []
-    
+     
     # Generar introducción si está seleccionada
     if include_intro:
         st.write("⏳ Generating introduction...")
@@ -299,9 +299,17 @@ if st.button("🚀 Generate Book"):
     for i in range(1, num_chapters + 1):
         st.write(f"⏳ Generating chapter {i}...")
         chapter_content = generate_chapter(api_key, topic, audience, i, selected_language.lower(), table_of_contents, specific_instructions)
-        word_count = len(chapter_content.split())   # Contar palabras
+        word_count = len(chapter_content.split())  # Contar palabras
+        
+        # Verificar si el capítulo tiene al menos 2500 palabras
+        while word_count < 2500:
+            st.warning(f"Chapter {i} has only {word_count} words. Regenerating content...")
+            additional_content = generate_chapter(api_key, topic, audience, i, selected_language.lower(), table_of_contents, specific_instructions)
+            chapter_content += "\n\n" + additional_content
+            word_count = len(chapter_content.split())
+        
         chapters.append(chapter_content)
-        with st.expander(f" Chapter {i} ({word_count} words)"):
+        with st.expander(f"📖 Chapter {i} ({word_count} words)"):
             st.write(chapter_content)
         progress_bar.progress(i / num_chapters)
     
