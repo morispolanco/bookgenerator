@@ -92,7 +92,6 @@ def generate_chapter(api_key, topic, audience, chapter_number, language, table_o
             "temperature": 1,
             "topK": 40,
             "topP": 0.95,
-            "maxOutputTokens": 8192,
             "responseMimeType": "text/plain"
         }
     }
