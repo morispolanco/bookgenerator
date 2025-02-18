@@ -35,23 +35,6 @@ def process_lists(text):
 
     return '\n\n'.join(processed_lines)
 
-# Function to remove unnecessary comments
-def remove_unnecessary_comments(text):
-    """Remove common comment-like phrases from the generated text."""
-    patterns = [
-        r"¡.*!",  # Exclamation phrases
-        r"Aquí está el capítulo \d+",  # "Here is chapter X"
-        r"Este capítulo trata sobre",  # "This chapter deals with..."
-        r"En este capítulo",  # "In this chapter..."
-        r"El objetivo de este capítulo",  # "The goal of this chapter..."
-        r"Vamos a explorar",  # "Let's explore..."
-    ]
-    for pattern in patterns:
-        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\(.*?\)", "", text)  # Remove parentheses with content
-    text = re.sub(r"\n{3,}", "\n\n", text)  # Remove excessive line breaks
-    return text.strip()
-
 # Function to format titles based on language rules
 def format_title(title, language):
     """Capitalize titles according to language-specific rules."""
@@ -67,11 +50,11 @@ def generate_chapter(api_key, topic, audience, chapter_number, language, table_o
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
     
     if is_intro:
-        message_content = f"Write an introduction about {topic} for {audience}. Use 500-800 words."
+        message_content = f"Write an introduction about {topic} for {audience}."
     elif is_conclusion:
-        message_content = f"Write conclusions about {topic} for {audience}. Use 500-800 words."
+        message_content = f"Write conclusions about {topic} for {audience}."
     else:
-        message_content = f"Write chapter {chapter_number} about {topic} for {audience}. Use at least 2500 words."
+        message_content = f"Write chapter {chapter_number} about {topic} for {audience}."
 
     if table_of_contents:
         message_content += f" Follow this structure: {table_of_contents}"
@@ -96,9 +79,7 @@ def generate_chapter(api_key, topic, audience, chapter_number, language, table_o
         st.error(f"Error generating chapter {chapter_number}: {str(e)}")
         content = "Error generating the chapter."
 
-    cleaned_content = clean_markdown(content)
-    cleaned_content = remove_unnecessary_comments(cleaned_content)
-    return cleaned_content
+    return clean_markdown(content)
 
 # Function to add page numbers to the Word document
 def add_page_numbers(doc):
@@ -192,7 +173,9 @@ st.set_page_config(page_title="Automatic Book Generator", page_icon="📚")
 st.title("📚 Automatic Book Generator")
 st.sidebar.header("📖 How does this app work?")
 st.sidebar.markdown("""
-This application generates non-fiction books in `.docx` format based on a topic and target audience.
+This application generates books in `.docx` format based on a topic and target audience.  
+The books can be **fiction** or **non-fiction**, depending on your input.  
+
 **Steps to use it:**
 1. Enter the book's topic.
 2. Specify the target audience.
@@ -253,13 +236,8 @@ if st.button("🚀 Generate Book"):
     for i in range(1, num_chapters + 1):
         st.write(f"⏳ Generating chapter {i}...")
         chapter_content = generate_chapter(api_key, topic, audience, i, selected_language.lower(), table_of_contents, specific_instructions)
-        word_count = len(chapter_content.split())
-        while word_count < 2500:  # Ensure minimum word count
-            additional_content = generate_chapter(api_key, topic, audience, i, selected_language.lower(), table_of_contents, specific_instructions)
-            chapter_content += "\n\n" + additional_content
-            word_count = len(chapter_content.split())
         chapters.append(chapter_content)
-        with st.expander(f"📖 Chapter {i} ({word_count} words)"):
+        with st.expander(f"📖 Chapter {i}"):
             st.write(chapter_content)
         progress_bar.progress(i / num_chapters)
 
