@@ -60,16 +60,16 @@ def format_title(title, language):
         return title.title()
 
 # Función para generar un capítulo usando Google Gemini
-def generate_chapter(api_key, topic, audience, chapter_number, language, table_of_contents="", specific_instructions="", is_intro=False, is_conclusion=False, word_count_range=(2000, 2500)):
+def generate_chapter(api_key, topic, audience, chapter_number, language, table_of_contents="", specific_instructions="", is_intro=False, is_conclusion=False):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
     
     # Construir el mensaje con la tabla de contenido e instrucciones específicas
     if is_intro:
-        message_content = f"Escribe una introducción sobre {topic} dirigida a {audience}. Usa entre {word_count_range[0]} y {word_count_range[1]} palabras."
+        message_content = f"Escribe una introducción sobre {topic} dirigida a {audience}."
     elif is_conclusion:
-        message_content = f"Escribe una conclusión sobre {topic} dirigida a {audience}. Usa entre {word_count_range[0]} y {word_count_range[1]} palabras."
+        message_content = f"Escribe una conclusión sobre {topic} dirigida a {audience}."
     else:
-        message_content = f"Escribe el capítulo {chapter_number} sobre {topic} dirigido a {audience}. Usa entre {word_count_range[0]} y {word_count_range[1]} palabras."
+        message_content = f"Escribe el capítulo {chapter_number} sobre {topic} dirigido a {audience}."
     
     if table_of_contents:
         message_content += f" Sigue esta estructura: {table_of_contents}"
@@ -254,15 +254,6 @@ specific_instructions = st.text_area(
     placeholder="Provide specific instructions for the book (e.g., tone, style, key points to include)."
 )
 
-# Rango de palabras por capítulo
-word_count_range = st.slider(
-    "📖 Word Count Range per Chapter",
-    min_value=500,
-    max_value=5000,
-    value=(2000, 2500),
-    step=100
-)
-
 num_chapters = st.slider("🔢 Number of Chapters", min_value=1, max_value=20, value=5)
 
 # Opciones para introducción y conclusiones
@@ -298,17 +289,7 @@ if st.button("🚀 Generate Book"):
     # Generar introducción si está seleccionada
     if include_intro:
         st.write("⏳ Generating introduction...")
-        intro_content = generate_chapter(
-            api_key, 
-            topic, 
-            audience, 
-            0, 
-            selected_language.lower(), 
-            table_of_contents, 
-            specific_instructions, 
-            is_intro=True,
-            word_count_range=(500, 800)  # Rango fijo para introducción
-        )
+        intro_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions, is_intro=True)
         chapters.append(intro_content)
         with st.expander("🌟 Introduction"):
             st.write(intro_content)
@@ -317,16 +298,7 @@ if st.button("🚀 Generate Book"):
     progress_bar = st.progress(0)
     for i in range(1, num_chapters + 1):
         st.write(f"⏳ Generating chapter {i}...")
-        chapter_content = generate_chapter(
-            api_key, 
-            topic, 
-            audience, 
-            i, 
-            selected_language.lower(), 
-            table_of_contents, 
-            specific_instructions,
-            word_count_range=word_count_range  # Usar el rango de palabras seleccionado
-        )
+        chapter_content = generate_chapter(api_key, topic, audience, i, selected_language.lower(), table_of_contents, specific_instructions)
         word_count = len(chapter_content.split())  # Contar palabras
         chapters.append(chapter_content)
         with st.expander(f"📖 Chapter {i} ({word_count} words)"):
@@ -336,17 +308,7 @@ if st.button("🚀 Generate Book"):
     # Generar conclusiones si están seleccionadas
     if include_conclusion:
         st.write("⏳ Generating conclusions...")
-        conclusion_content = generate_chapter(
-            api_key, 
-            topic, 
-            audience, 
-            0, 
-            selected_language.lower(), 
-            table_of_contents, 
-            specific_instructions, 
-            is_conclusion=True,
-            word_count_range=(500, 800)  # Rango fijo para conclusiones
-        )
+        conclusion_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions, is_conclusion=True)
         chapters.append(conclusion_content)
         with st.expander("🔚 Conclusions"):
             st.write(conclusion_content)
