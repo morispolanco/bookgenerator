@@ -75,7 +75,6 @@ def generate_chapter(api_key, topic, audience, chapter_number, language, table_o
         "contents": [{"role": "user", "parts": [{"text": message_content}]}],
         "generationConfig": {
             "temperature": 0.7,  # Ajuste para más coherencia y relevancia
-            "maxOutputTokens": 4000,  # Aumentado para permitir más texto
             "topK": 40,
             "topP": 0.95,
             "responseMimeType": "text/plain"
