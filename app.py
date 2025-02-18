@@ -14,11 +14,11 @@ def clean_markdown(text):
     text = re.sub(r'[#*_`]', '', text)  # Eliminar caracteres especiales de Markdown
     return text.strip()
 
-# Función para procesar listas y diálogos, reemplazando guiones o comillas por rayas
+# Función para procesar listas y diálogos, reemplazando guiones por rayas
 def process_dialogues_and_lists(text):
     """
     Procesa el texto para:
-    1. Reemplazar guiones ('-') o comillas ('"') al inicio de diálogos por rayas ('—').
+    1. Reemplazar guiones ('-') al inicio de las listas o diálogos por rayas ('—').
     2. Asegurar que después de las listas haya un salto de párrafo.
     """
     lines = text.split('\n')  # Dividir el texto en líneas
@@ -27,9 +27,9 @@ def process_dialogues_and_lists(text):
 
     for line in lines:
         stripped_line = line.strip()
-        if stripped_line.startswith('-') or stripped_line.startswith('"'):  # Detectar líneas que comienzan con un guion o comillas
-            # Reemplazar el guion o comillas por una raya
-            processed_line = stripped_line.replace('-', '—', 1).replace('"', '—', 1)
+        if stripped_line.startswith('-'):  # Detectar líneas que comienzan con un guion
+            # Reemplazar el guion por una raya
+            processed_line = stripped_line.replace('-', '—', 1)
             processed_lines.append(processed_line)
             in_list = True
         else:
@@ -42,6 +42,24 @@ def process_dialogues_and_lists(text):
     # Unir las líneas procesadas con saltos de párrafo
     return '\n\n'.join(processed_lines)
 
+# Función para eliminar transiciones al siguiente capítulo
+def remove_next_chapter_references(text, chapter_number):
+    """
+    Elimina referencias al siguiente capítulo dentro del texto.
+    """
+    patterns = [
+        r"capítulo siguiente",  # Referencias en español
+        r"próximo capítulo",
+        r"continúa en el capítulo",
+        r"next chapter",       # Referencias en inglés
+        r"continue to chapter",
+        rf"chapter {chapter_number + 1}",  # Referencias específicas al siguiente capítulo
+        rf"capítulo {chapter_number + 1}"
+    ]
+    for pattern in patterns:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    return text.strip()
+
 # Función para aplicar reglas de capitalización según el idioma
 def format_title(title, language):
     """
@@ -50,26 +68,22 @@ def format_title(title, language):
     - Otros idiomas: Mayúscula inicial en cada palabra.
     """
     if language.lower() == "spanish":
-        # Dividir el título en palabras
         words = title.split()
-        # Mantener mayúscula inicial solo en la primera palabra y nombres propios
         formatted_words = [words[0].capitalize()] + [word.lower() for word in words[1:]]
         return " ".join(formatted_words)
     else:
-        # Capitalizar cada palabra para otros idiomas
         return title.title()
 
 # Función para generar un capítulo usando Google Gemini
-def generate_chapter(api_key, topic, audience, chapter_number, language, table_of_contents="", specific_instructions="", is_intro=False, is_conclusion=False):
+def generate_chapter(api_key, topic, audience, chapter_number, language, table_of_contents="", specific_instructions=""):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
     
     # Construir el mensaje con la tabla de contenido e instrucciones específicas
-    if is_intro:
-        message_content = f"Escribe una introducción sobre {topic} dirigida a {audience}. Usa rayas (—) para los diálogos."
-    elif is_conclusion:
-        message_content = f"Escribe una conclusión sobre {topic} dirigida a {audience}. Usa rayas (—) para los diálogos."
-    else:
-        message_content = f"Escribe el capítulo {chapter_number} sobre {topic} dirigido a {audience}. Usa rayas (—) para los diálogos."
+    message_content = (
+        f"Escribe el capítulo {chapter_number} sobre {topic} dirigido a {audience}. "
+        f"El capítulo debe tener al menos 2000 palabras y ser completamente independiente. "
+        f"No incluyas referencias al siguiente capítulo ni frases como 'continúa en el próximo capítulo'."
+    )
     
     if table_of_contents:
         message_content += f" Sigue esta estructura: {table_of_contents}"
@@ -78,16 +92,49 @@ def generate_chapter(api_key, topic, audience, chapter_number, language, table_o
         message_content += f" {specific_instructions}"
     
     data = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {
-                        "text": message_content
-                    }
-                ]
-            }
-        ],
+        "contents": [{"role": "user", "parts": [{"text": message_content}]}],
+        "generationConfig": {
+            "temperature": 1,
+            "topK": 40,
+            "topP": 0.95,
+            "maxOutputTokens": 8192,
+            "responseMimeType": "text/plain"
+        }
+    }
+    
+    try:
+        response = requests.post(url, json=data)
+        response.raise_for_status()
+        content = response.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "Error generating the chapter.")
+    except Exception as e:
+        st.error(f"Error generating chapter {chapter_number}: {str(e)}")
+        content = "Error generating the chapter."
+    
+    # Validar el número de palabras
+    word_count = len(content.split())
+    while word_count < 2000:  # Si no alcanza las 2000 palabras, solicitar más contenido
+        additional_content = generate_additional_content(api_key, topic, audience, chapter_number, language)
+        content += "\n\n" + additional_content
+        word_count = len(content.split())
+    
+    # Eliminar referencias al siguiente capítulo
+    content = remove_next_chapter_references(content, chapter_number)
+    
+    # Procesar diálogos y listas
+    processed_content = process_dialogues_and_lists(content)
+    
+    return clean_markdown(processed_content)
+
+# Función para generar contenido adicional si no se alcanza el mínimo de palabras
+def generate_additional_content(api_key, topic, audience, chapter_number, language):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    message_content = (
+        f"Continúa escribiendo el capítulo {chapter_number} sobre {topic} dirigido a {audience}. "
+        f"Asegúrate de no incluir referencias al siguiente capítulo."
+    )
+    
+    data = {
+        "contents": [{"role": "user", "parts": [{"text": message_content}]}],
         "generationConfig": {
             "temperature": 1,
             "topK": 40,
@@ -98,23 +145,20 @@ def generate_chapter(api_key, topic, audience, chapter_number, language, table_o
     
     try:
         response = requests.post(url, json=data)
-        response.raise_for_status()  # Lanza una excepción si hay un error HTTP
-        content = response.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "Error generating the chapter.")
+        response.raise_for_status()
+        content = response.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "Error generating additional content.")
     except Exception as e:
-        st.error(f"Error generating chapter {chapter_number}: {str(e)}")
-        content = "Error generating the chapter."
+        st.error(f"Error generating additional content for chapter {chapter_number}: {str(e)}")
+        content = "Error generating additional content."
     
-    # Procesar diálogos y listas
-    processed_content = process_dialogues_and_lists(content)
-    
-    return clean_markdown(processed_content)
+    return clean_markdown(content)
 
 # Función para agregar numeración de páginas al documento Word
 def add_page_numbers(doc):
     for section in doc.sections:
         footer = section.footer
         paragraph = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER  # Center alignment
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = paragraph.add_run()
         fldChar = OxmlElement('w:fldChar')
         fldChar.set(qn('w:fldCharType'), 'begin')
@@ -145,7 +189,7 @@ def create_word_document(chapters, title, author_name, author_bio, language):
     # Añadir título formateado según el idioma
     formatted_title = format_title(title, language)
     title_paragraph = doc.add_paragraph()
-    title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER  # Center alignment
+    title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title_run = title_paragraph.add_run(formatted_title)
     title_run.bold = True
     title_run.font.size = Pt(14)
@@ -154,11 +198,11 @@ def create_word_document(chapters, title, author_name, author_bio, language):
     # Añadir nombre del autor si está proporcionado
     if author_name:
         author_paragraph = doc.add_paragraph()
-        author_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER  # Center alignment
+        author_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         author_run = author_paragraph.add_run(author_name)
         author_run.font.size = Pt(12)
         author_run.font.name = "Times New Roman"
-        doc.add_page_break()  # Salto de página después del título y autor
+        doc.add_page_break()
 
     # Añadir perfil del autor si está proporcionado
     if author_bio:
@@ -167,11 +211,10 @@ def create_word_document(chapters, title, author_name, author_bio, language):
         bio_paragraph.runs[0].font.size = Pt(11)
         bio_paragraph.runs[0].font.name = "Times New Roman"
         doc.add_paragraph(author_bio).style = "Normal"
-        doc.add_page_break()  # Salto de página después del perfil del autor
+        doc.add_page_break()
 
     # Añadir capítulos
     for i, chapter in enumerate(chapters, 1):
-        # Añadir encabezado del capítulo formateado según el idioma
         chapter_title_text = f"Chapter {i}" if language.lower() != "spanish" else f"Capítulo {i}"
         formatted_chapter_title = format_title(chapter_title_text, language)
         chapter_title = doc.add_paragraph(formatted_chapter_title)
@@ -179,36 +222,28 @@ def create_word_document(chapters, title, author_name, author_bio, language):
         chapter_title.runs[0].font.size = Pt(12)
         chapter_title.runs[0].font.name = "Times New Roman"
 
-        # Procesar el contenido del capítulo
-        processed_chapter = process_dialogues_and_lists(chapter)  # Procesar diálogos y listas
-        paragraphs = processed_chapter.split('\n\n')  # Dividir por párrafos
+        paragraphs = chapter.split('\n\n')
         for para_text in paragraphs:
-            # Eliminar saltos de línea manuales dentro del párrafo
             para_text = para_text.replace('\n', ' ').strip()
-            paragraph = doc.add_paragraph(para_text)  # Crear un nuevo párrafo
+            paragraph = doc.add_paragraph(para_text)
             paragraph.style = "Normal"
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY  # Alineación justificada
-            paragraph.paragraph_format.space_after = Pt(0)  # Espaciado posterior de 12 puntos
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            paragraph.paragraph_format.space_after = Pt(0)
             for run in paragraph.runs:
                 run.font.size = Pt(11)
                 run.font.name = "Times New Roman"
 
-        doc.add_page_break()  # Salto de página entre capítulos
+        doc.add_page_break()
 
-    # Agregar numeración de páginas
     add_page_numbers(doc)
 
-    # Guardar el documento en memoria
     buffer = BytesIO()
     doc.save(buffer)
     buffer.seek(0)
     return buffer
 
 # Configuración de Streamlit
-st.set_page_config(
-    page_title="Automatic Book Generator",
-    page_icon="📚",  # Ícono para la pestaña del navegador
-)
+st.set_page_config(page_title="Automatic Book Generator", page_icon="📚")
 
 # Título con ícono
 st.title("📚 Automatic Book Generator")
@@ -245,37 +280,14 @@ api_key = st.secrets["GOOGLE_API_KEY"]
 # Entradas del usuario
 topic = st.text_input("📒 Book Topic:")
 audience = st.text_input("🎯 Target Audience:")
-
-# Campo para la tabla de contenido optativa
-table_of_contents = st.text_area(
-    "📚 Optional Table of Contents:",
-    placeholder="Provide a table of contents for longer chapters."
-)
-
-# Campo para instrucciones específicas optativas
-specific_instructions = st.text_area(
-    "📝 Optional Specific Instructions:",
-    placeholder="Provide specific instructions for the book."
-)
-
+table_of_contents = st.text_area("📚 Optional Table of Contents:", placeholder="Provide a table of contents for longer chapters.")
+specific_instructions = st.text_area("📝 Optional Specific Instructions:", placeholder="Provide specific instructions for the book.")
 num_chapters = st.slider("🔢 Number of Chapters", min_value=1, max_value=20, value=5)
-
-# Opciones para introducción y conclusiones
 include_intro = st.checkbox("Include Introduction", value=True)
 include_conclusion = st.checkbox("Include Conclusions", value=True)
-
-# Opciones adicionales
 author_name = st.text_input("🖋️ Author Name (optional):")
-author_bio = st.text_area(
-    "👤 Author Profile (optional):",
-    placeholder="Example: Brief professional description or biography."
-)
-
-# Menú desplegable para elegir el idioma
-languages = [
-    "English", "Spanish", "French", "German", "Chinese", "Japanese",
-    "Russian", "Portuguese", "Italian", "Arabic", "Medieval Latin", "Koine Greek"
-]
+author_bio = st.text_area("👤 Author Profile (optional):", placeholder="Brief professional description or biography.")
+languages = ["English", "Spanish", "French", "German", "Chinese", "Japanese", "Russian", "Portuguese", "Italian", "Arabic", "Medieval Latin", "Koine Greek"]
 selected_language = st.selectbox("🌐 Choose the book's language:", languages)
 
 # Estado de Streamlit para almacenar los capítulos generados
@@ -287,17 +299,17 @@ if st.button("🚀 Generate Book"):
     if not topic or not audience:
         st.error("Please enter a valid topic and target audience.")
         st.stop()
-    
+
     chapters = []
-     
+
     # Generar introducción si está seleccionada
     if include_intro:
         st.write("⏳ Generating introduction...")
-        intro_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions, is_intro=True)
+        intro_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions)
         chapters.append(intro_content)
         with st.expander("🌟 Introduction"):
             st.write(intro_content)
-    
+
     # Generar capítulos principales
     progress_bar = st.progress(0)
     for i in range(1, num_chapters + 1):
@@ -308,16 +320,15 @@ if st.button("🚀 Generate Book"):
         with st.expander(f"📖 Chapter {i} ({word_count} words)"):
             st.write(chapter_content)
         progress_bar.progress(i / num_chapters)
-    
+
     # Generar conclusiones si están seleccionadas
     if include_conclusion:
         st.write("⏳ Generating conclusions...")
-        conclusion_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions, is_conclusion=True)
+        conclusion_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions)
         chapters.append(conclusion_content)
         with st.expander("🔚 Conclusions"):
             st.write(conclusion_content)
-    
-    # Almacenar los capítulos en el estado de Streamlit
+
     st.session_state.chapters = chapters
 
 # Mostrar opciones de descarga si hay capítulos generados
