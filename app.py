@@ -46,15 +46,15 @@ def format_title(title, language):
         return title.title()
 
 # Function to generate a chapter using Google Gemini
-def generate_chapter(api_key, topic, audience, chapter_number, language, table_of_contents="", specific_instructions="", is_intro=False, is_conclusion=False):
+def generate_chapter(api_key, topic, audience, chapter_number, language, table_of_contents="", specific_instructions="", word_count_range=(2000, 2500), is_intro=False, is_conclusion=False):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
     
     if is_intro:
-        message_content = f"Write an introduction about {topic} for {audience}."
+        message_content = f"Write an introduction about {topic} for {audience}. Use between {word_count_range[0]} and {word_count_range[1]} words."
     elif is_conclusion:
-        message_content = f"Write conclusions about {topic} for {audience}."
+        message_content = f"Write conclusions about {topic} for {audience}. Use between {word_count_range[0]} and {word_count_range[1]} words."
     else:
-        message_content = f"Write chapter {chapter_number} about {topic} for {audience}."
+        message_content = f"Write chapter {chapter_number} about {topic} for {audience}. Use between {word_count_range[0]} and {word_count_range[1]} words."
 
     if table_of_contents:
         message_content += f" Follow this structure: {table_of_contents}"
@@ -78,6 +78,38 @@ def generate_chapter(api_key, topic, audience, chapter_number, language, table_o
     except Exception as e:
         st.error(f"Error generating chapter {chapter_number}: {str(e)}")
         content = "Error generating the chapter."
+
+    # Validate word count
+    word_count = len(content.split())
+    while word_count < word_count_range[0]:
+        additional_content = generate_additional_content(api_key, topic, audience, chapter_number, language, word_count_range)
+        content += "\n\n" + additional_content
+        word_count = len(content.split())
+
+    return clean_markdown(content)
+
+# Function to generate additional content if word count is insufficient
+def generate_additional_content(api_key, topic, audience, chapter_number, language, word_count_range):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    message_content = f"Continue writing chapter {chapter_number} about {topic} for {audience}. Use at least {word_count_range[0]} words."
+    
+    data = {
+        "contents": [{"role": "user", "parts": [{"text": message_content}]}],
+        "generationConfig": {
+            "temperature": 1,
+            "topK": 40,
+            "topP": 0.95,
+            "responseMimeType": "text/plain"
+        }
+    }
+
+    try:
+        response = requests.post(url, json=data)
+        response.raise_for_status()
+        content = response.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "Error generating additional content.")
+    except Exception as e:
+        st.error(f"Error generating additional content for chapter {chapter_number}: {str(e)}")
+        content = "Error generating additional content."
 
     return clean_markdown(content)
 
@@ -226,7 +258,7 @@ if st.button("🚀 Generate Book"):
     # Generate introduction
     if include_intro:
         st.write("⏳ Generating introduction...")
-        intro_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions, is_intro=True)
+        intro_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions, word_count_range=(500, 800), is_intro=True)
         chapters.append(intro_content)
         with st.expander("🌟 Introduction"):
             st.write(intro_content)
@@ -235,7 +267,7 @@ if st.button("🚀 Generate Book"):
     progress_bar = st.progress(0)
     for i in range(1, num_chapters + 1):
         st.write(f"⏳ Generating chapter {i}...")
-        chapter_content = generate_chapter(api_key, topic, audience, i, selected_language.lower(), table_of_contents, specific_instructions)
+        chapter_content = generate_chapter(api_key, topic, audience, i, selected_language.lower(), table_of_contents, specific_instructions, word_count_range=(2000, 2500))
         chapters.append(chapter_content)
         with st.expander(f"📖 Chapter {i}"):
             st.write(chapter_content)
@@ -244,7 +276,7 @@ if st.button("🚀 Generate Book"):
     # Generate conclusions
     if include_conclusion:
         st.write("⏳ Generating conclusions...")
-        conclusion_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions, is_conclusion=True)
+        conclusion_content = generate_chapter(api_key, topic, audience, 0, selected_language.lower(), table_of_contents, specific_instructions, word_count_range=(500, 800), is_conclusion=True)
         chapters.append(conclusion_content)
         with st.expander("🔚 Conclusions"):
             st.write(conclusion_content)
